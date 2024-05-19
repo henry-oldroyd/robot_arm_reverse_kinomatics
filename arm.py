@@ -4,8 +4,8 @@
 # why does the formula need adjusting by -1 multiplier
 
 
-from transformation_compotision import Transformation_Composion
-from differential_operations import Range_Limit_Vector
+from transformation_compotision import Differentiable_Transformation_Composion
+import differential_operations as do
 from math import pi
 import numpy as np
 
@@ -85,10 +85,10 @@ class Robot_Arm:
         self._angle_intervals = angle_intervals
 
         # create a Range_Limit_Vector object to map the angles to the intervals
-        self._angle_interval_mapping = Range_Limit_Vector(angle_intervals)
+        self._angle_interval_mapping = do.Range_Limit_Vector(angle_intervals)
 
         # set up the grap point transformation as a blank composition
-        self._grap_point_transformation_composition = Transformation_Composion()
+        self._grap_point_transformation_composition = Differentiable_Transformation_Composion()
 
 
         # build up the transformation composition by adding joints in reverse order then base 
@@ -102,18 +102,23 @@ class Robot_Arm:
         joint_indexes_reversed = reversed(range(len(starting_joint_position_vectors)))
         for joint_i in joint_indexes_reversed:
             # add a rotation about the j axis for each joint to the transformation composition
-            self._grap_point_transformation_composition.add_rotation_about_vector(
-                rotation_vector=j_vector,
-                center_vector=starting_joint_position_vectors[joint_i],
+            self._grap_point_transformation_composition.add_operation(
+                operation= do.Centered_Rotaion_About_Vector_3D(
+                    rotation_vector=j_vector,
+                    center_vector=starting_joint_position_vectors[joint_i]
+                ),
                 parameter_name=f"theta_j{joint_i+1}"
             )
 
+
         # add a rotation about the k axis for the base servo to the transformation composition
-        self._grap_point_transformation_composition.add_rotation_about_vector(
-            rotation_vector=k_vector,
-            center_vector=starting_base_position_vector,
-            parameter_name=f"theta_j0"
-        )
+        self._grap_point_transformation_composition.add_operation(
+                operation= do.Centered_Rotaion_About_Vector_3D(
+                    rotation_vector=k_vector,
+                    center_vector=starting_base_position_vector,
+                ),
+                parameter_name=f"theta_j0"
+            )
 
         
     # this method will return the position of the grap point given the angles of the arm
@@ -149,7 +154,11 @@ class Robot_Arm:
 
     # this method will return the angles of the arm given the position of the grap point
     # this is an optimisation problem so we will use gradient descent
-    def get_angles_for_GP_position(self, desired_GP_position: np.ndarray):
+    def get_angles_for_GP_position(self, desired_GP_position: np.ndarray, echo: bool = False) -> np.ndarray:
+        # chech that the echo parameter is a boolean
+        if not isinstance(echo, bool):
+            raise TypeError("The echo parameter must be a boolean")
+
         # check that the desired position is a numpy array of shape (3,)
         if not isinstance(desired_GP_position, np.ndarray):
             raise TypeError("The desired position must be a numpy array")
@@ -171,7 +180,7 @@ class Robot_Arm:
         current_angles_precursors = np.zeros((self._num_joints + 1,))
         
         # map the angles to the target interval
-        current_angles = self._angle_interval_mapping.map_vector_to_target_interval(current_angles_precursors)
+        current_angles = self._angle_interval_mapping.function(current_angles_precursors)
 
         # for each SGD update
         for update_index in range(max_updates):
@@ -188,7 +197,7 @@ class Robot_Arm:
             ]).reshape((self._num_joints + 1, 3))
 
             # get the derivative of the mapping from precursors to angles
-            angles_mapping_derivative = self._angle_interval_mapping.derivative_of_mapping(current_angles_precursors)
+            angles_mapping_derivative = self._angle_interval_mapping.derivative_WR_vector(current_angles_precursors)
 
             # apply chain rule to get dl/dprecursors
             derivative_of_loss_WR_precursors = (-1/2) * (
@@ -201,18 +210,18 @@ class Robot_Arm:
             current_angles_precursors -= learning_rate * derivative_of_loss_WR_precursors
 
             # get current angles from new precursors
-            current_angles = self._angle_interval_mapping.map_vector_to_target_interval(current_angles_precursors)
+            current_angles = self._angle_interval_mapping.function(current_angles_precursors)
 
+            if echo:
+                # get current loss from new precursors for printing
+                loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
 
-            # # get current loss from new precursors for printing
-            # loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
-
-            # # print out the current state of the optimisation algorithm             
-            # print(f"Iteration {update_index}:")
-            # print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
-            # print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
-            # print(f"Current loss is:  {loss}")      
-        
+                # print out the current state of the optimisation algorithm             
+                print(f"Iteration {update_index}:")
+                print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
+                print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
+                print(f"Current loss is:  {loss}")      
+            
 
         # return the best angles found
         return current_angles
@@ -223,9 +232,10 @@ class Leipzig_Robot_Arm(Robot_Arm):
     def __init__(self) -> None:
         # this is an arbitrary set of initial angles and arm lengths
         # these should be replaces with known infomation about the arms position at specific angles
-        arm_initial_angles = (pi, pi/2, pi/2, pi/2)
+        # the robots's base can be controled by a 180 degree angle servo and still grab all points
+        arm_initial_angles = (pi/2,) * 4
 
-        arm_max_angles = (2*pi, pi, pi, pi)
+        arm_max_angles = (pi,) * 4
         arm_angle_intervals = tuple((0.0, max_angle) for max_angle in arm_max_angles)
 
         # compute position vectors of all joints and the grap point

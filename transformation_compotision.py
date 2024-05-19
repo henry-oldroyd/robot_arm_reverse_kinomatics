@@ -6,7 +6,7 @@ import numpy as np
 # it will be able to foreward propagate to take a vector and produce the image vector from this combined transformation
 # this will require a dictionary of names parameters for each of the Parameterised_Differentiable_Tranformation
 # it can also back propagate to find the pertial derivatives of the image vector with respect to each of the trainable paramters (used for SGD)
-class Transformation_Composion():
+class Differentiable_Transformation_Composion():
     # constructor takes not arguments
     def __init__(self) -> None:
         self._operations: list[do.Differentiable_Tranformation] = []
@@ -39,23 +39,6 @@ class Transformation_Composion():
         # add it as a pair with key equal to the index of the operation
         if isinstance(operation, do.Parameterised_Differentiable_Tranformation):
             self._required_parameters[len(self._operations)-1] = parameter_name
-
-
-    # this function will compute and add multiple transformations to allow for rotation about a vector with a center not at the origin
-    def add_rotation_about_vector(self, rotation_vector, center_vector, parameter_name):
-        # translate center_vector to orign
-        self.add_operation(
-            do.Translate(-center_vector)
-        )
-        # complete parameterised rotation about vector centered at orignin (linear transformation)
-        self.add_operation(
-            do.Rotation_About_Vector(rotation_vector),
-            parameter_name,
-        )
-        # translate origin back to center vector 
-        self.add_operation(
-            do.Translate(center_vector)
-        )
 
 
     # this method acts as the foreward propagation
