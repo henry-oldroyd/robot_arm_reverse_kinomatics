@@ -1,0 +1,62 @@
+I have an optimisation problem where I need to get the appropriate joint angles for my robot arm graph point to move to a certain prosition.
+
+Angles (A) is a 4x1 vector
+Desired position (DP) is a 3x1 vector
+
+Get arm position as angles (S(A)) is a function that maps angles to the position. 
+
+loss is MSE of current displacement and desired displacement
+Loss (L) = 1/4 *  (DA  - S(A)).T @ (DA - S(A))
+
+I have a function that maps any 4x1 vector to one in the range (2 pi, pi, pi, pi)
+Angles is a function that maps a precursor value in any range to a set of angles (A(P))
+
+So 
+MSE(V) = 1/4 * V.T @ V
+Loss  as a function of P (L(P)) = MSE(
+   DA - S(A(P))
+)
+
+Desired angles (DA) = A(
+  argmin(P) [L(P)]
+)
+
+So 
+alpha = 0.1
+P0 = [0,0,0,0]
+Pn+1 = Pn - alpha * d/dP [L(Pn)]
+(whre d/dX represents a partial derivative)
+
+DA = A(lim n-> infinity (Pn) )
+
+The question i want you to help me with is: is math below the correct application of the chain rule for SGD here?
+
+Pn+1 = Pn - alpha * d/dP [L(Pn)]
+=> implies by chain rule
+Pn+1 = Pn - alpha 
+* ( dL / d(DA - S(A(Pn))) ) 
+* ( d(DA - S(A(Pn))) / d( S(A(Pn))) )
+* ( d( S(A(Pn)) )  / d( A(Pn)) )
+* ( d( A(Pn))  / d( Pn) )
+
+which when simplified gives
+Pn+1 = Pn - alpha 
+* 2/4*(DA - S(A(Pn))) 
+* -1
+* S'( A(Pn) )
+* A'(Pn)
+
+Pn+1 = Pn + 1/2 * alpha 
+* (DA - S(A(Pn))) 
+* S'( A(Pn) )
+* A'(Pn)
+
+reverse product to make matrix dimensions work:
+(DA - S(A(Pn))) is 3x1
+S'( A(Pn) ) is 4x3 (by my workings could be 3x4)
+A'(Pn) is 4x4
+
+Pn+1 = Pn + 1/2 * alpha
+* A'(Pn) 
+* S'( A(Pn) )
+* (DA - S(A(Pn))) 
