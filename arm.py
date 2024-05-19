@@ -163,75 +163,59 @@ class Robot_Arm:
         # hyperparameters for the gradient descent search for angles
         # high learning rate numerically stable for this problem
         learning_rate = 0.5
-        # number of random starting angles improved with SGD before best taken
-        max_tries = 1
+
         # the number of updates with SGD for each set of starting angles
+        # higher number means more accuracy but slower
         max_updates = 200
 
-        # record the best angles and loss so far in tries
-        best_angles = None
-        best_loss = 10**10
+        current_angles_precursors = np.zeros((self._num_joints + 1,))
+        
+        # map the angles to the target interval
+        current_angles = self._angle_interval_mapping.map_vector_to_target_interval(current_angles_precursors)
 
+        # for each SGD update
+        for update_index in range(max_updates):
+            # get the current position of the grap point at current angles
+            current_GP_position = self.get_GP_position_at_angles(current_angles)
 
+            # get the derivative of the current position with respect to the angles
+            current_transformation_parameter_derivatives = self._grap_point_transformation_composition.get_parameter_derivatives() 
+            # convert paramerter derivatives dict to numpy array
 
-        # iterate through the number of tries
-        for try_num in range(max_tries):
-            # if first try use half way angles, else use random normal
-            if try_num == 0:
-                # corresponds to each servo angle starging in middle of range
-                current_angles_precursors = np.zeros((self._num_joints + 1,))
-            else:
-                current_angles_precursors = np.random.standard_normal((self._num_joints + 1,))
-           
-            # map the angles to the target interval
+            current_angles_derivative = np.array([
+                current_transformation_parameter_derivatives[f"theta_j{j_num}"]
+                for j_num in range(self._num_joints + 1)
+            ]).reshape((self._num_joints + 1, 3))
+
+            # get the derivative of the mapping from precursors to angles
+            angles_mapping_derivative = self._angle_interval_mapping.derivative_of_mapping(current_angles_precursors)
+
+            # apply chain rule to get dl/dprecursors
+            derivative_of_loss_WR_precursors = (-1/2) * (
+                angles_mapping_derivative
+                @ current_angles_derivative
+                @ (desired_GP_position - current_GP_position)
+            )
+
+            # update the precursors with the gradient descent step
+            current_angles_precursors -= learning_rate * derivative_of_loss_WR_precursors
+
+            # get current angles from new precursors
             current_angles = self._angle_interval_mapping.map_vector_to_target_interval(current_angles_precursors)
 
-            # for each SGD update
-            for update_index in range(max_updates):
-                # get the current position of the grap point at current angles
-                current_GP_position = self.get_GP_position_at_angles(current_angles)
 
-                # get the derivative of the current position with respect to the angles
-                current_transformation_parameter_derivatives = self._grap_point_transformation_composition.get_parameter_derivatives() 
-                # convert paramerter derivatives dict to numpy array
+            # # get current loss from new precursors for printing
+            # loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
 
-                current_angles_derivative = np.array([
-                    current_transformation_parameter_derivatives[f"theta_j{j_num}"]
-                    for j_num in range(self._num_joints + 1)
-                ]).reshape((self._num_joints + 1, 3))
-
-                # get the derivative of the mapping from precursors to angles
-                angles_mapping_derivative = self._angle_interval_mapping.derivative_of_mapping(current_angles_precursors)
-
-                # apply chain rule to get dl/dprecursors
-                derivative_of_loss_WR_precursors = (-1/2) * (
-                    angles_mapping_derivative
-                    @ current_angles_derivative
-                    @ (desired_GP_position - current_GP_position)
-                )
-
-                # update the precursors with the gradient descent step
-                current_angles_precursors -= learning_rate * derivative_of_loss_WR_precursors
-
-                # get current angles from new precursors
-                current_angles = self._angle_interval_mapping.map_vector_to_target_interval(current_angles_precursors)
-
-                # get current loss from new precursors
-                loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
-
-                # # print out the current state of the optimisation algorithm             
-                # print(f"Iteration {update_index}:")
-                # print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
-                # print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
-                # print(f"Current loss is:  {loss}")      
-            
-            # if the loss is the best so far, update the best loss and angles
-            if try_num == 0 or loss < best_loss:
-                best_loss = loss
-                best_angles = current_angles
+            # # print out the current state of the optimisation algorithm             
+            # print(f"Iteration {update_index}:")
+            # print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
+            # print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
+            # print(f"Current loss is:  {loss}")      
+        
 
         # return the best angles found
-        return best_angles
+        return current_angles
 
 
 # this represents the leipzig robot arm specifically
