@@ -6,7 +6,6 @@
 
 from transformation_compotision import Differentiable_Transformation_Composion
 import differential_operations as do
-from math import pi
 import numpy as np
 
 class Robot_Arm:
@@ -177,54 +176,104 @@ class Robot_Arm:
         # higher number means more accuracy but slower
         max_updates = 200
 
-        current_angles_precursors = np.zeros((self._num_joints + 1,))
-        
-        # map the angles to the target interval
-        current_angles = self._angle_interval_mapping.function(current_angles_precursors)
+        # momentum hyperparameter
+        # momentum_coefficeint = 0.9
+        # momentum_coefficeint = 0.5
+        # momentum_coefficeint = 0.1
+        momentum_coefficeint = 0.0
 
-        # for each SGD update
-        for update_index in range(max_updates):
-            # get the current position of the grap point at current angles
-            current_GP_position = self.get_GP_position_at_angles(current_angles)
 
-            # get the derivative of the current position with respect to the angles
-            current_transformation_parameter_derivatives = self._grap_point_transformation_composition.get_parameter_derivatives() 
-            # convert paramerter derivatives dict to numpy array
+        # precursors_different_vase_positions = (
+        #     np.array([-5.0, 0.0, 0.0, 0.0]),
+        #     np.zeros((self._num_joints + 1,)),
+        #     np.array([5.0, 0.0, 0.0, 0.0]),
+        # )
 
-            current_angles_derivative = np.array([
-                current_transformation_parameter_derivatives[f"theta_j{j_num}"]
-                for j_num in range(self._num_joints + 1)
-            ]).reshape((self._num_joints + 1, 3))
+        precursors_different_vase_positions = (
+            np.array([-1.0]*4),
+            np.array([0.0]*4),
+            np.array([1.0]*4),
+        )
 
-            # get the derivative of the mapping from precursors to angles
-            angles_mapping_derivative = self._angle_interval_mapping.derivative_WR_vector(current_angles_precursors)
 
-            # apply chain rule to get dl/dprecursors
-            derivative_of_loss_WR_precursors = (-1/2) * (
-                angles_mapping_derivative
-                @ current_angles_derivative
-                @ (desired_GP_position - current_GP_position)
-            )
+        best_angles = None
+        best_loss = float("inf")
 
-            # update the precursors with the gradient descent step
-            current_angles_precursors -= learning_rate * derivative_of_loss_WR_precursors
+        for current_angles_precursors in precursors_different_vase_positions:
 
-            # get current angles from new precursors
-            current_angles = self._angle_interval_mapping.function(current_angles_precursors)
+            # set up an accumulator for derivatives to use momentum
+            # set to additivie identity to start
+            precursor_derivatives_momentum = np.zeros((self._num_joints + 1,))
+
+            # map the angles to the target interval
+            starting_angles = self._angle_interval_mapping.function(current_angles_precursors)           
+            current_angles = starting_angles
+
+            # for each SGD update
+            for update_index in range(max_updates):
+                # get the current position of the grap point at current angles
+                current_GP_position = self.get_GP_position_at_angles(current_angles)
+
+                # get the derivative of the current position with respect to the angles
+                current_transformation_parameter_derivatives = self._grap_point_transformation_composition.get_parameter_derivatives() 
+                # convert paramerter derivatives dict to numpy array
+
+                current_angles_derivative = np.array([
+                    current_transformation_parameter_derivatives[f"theta_j{j_num}"]
+                    for j_num in range(self._num_joints + 1)
+                ]).reshape((self._num_joints + 1, 3))
+
+                # get the derivative of the mapping from precursors to angles
+                angles_mapping_derivative = self._angle_interval_mapping.derivative_WR_vector(current_angles_precursors)
+
+                # apply chain rule to get dl/dprecursors
+                derivative_of_loss_WR_precursors = (-1/2) * (
+                    angles_mapping_derivative
+                    @ current_angles_derivative
+                    @ (desired_GP_position - current_GP_position)
+                )
+
+                precursor_derivatives_momentum = (
+                    momentum_coefficeint * precursor_derivatives_momentum
+                    + (1-momentum_coefficeint) * derivative_of_loss_WR_precursors
+                )
+
+                # update the precursors with the gradient descent step
+                current_angles_precursors -= learning_rate * precursor_derivatives_momentum
+
+                # get current angles from new precursors
+                current_angles = self._angle_interval_mapping.function(current_angles_precursors)
+
+                # if echo:
+                #     # get current loss from new precursors for printing
+                #     loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
+
+                #     # print out the current state of the optimisation algorithm             
+                #     print(f"Iteration {update_index}:")
+                #     print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
+                #     print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
+                #     print(f"Current loss is:  {loss}")      
+                
+
+            # check if this loss is the best so far. If so update the best angles
+            loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
 
             if echo:
-                # get current loss from new precursors for printing
-                loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
-
-                # print out the current state of the optimisation algorithm             
-                print(f"Iteration {update_index}:")
-                print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
+                # print out the current state of the optimisation algorithm  
+                print(f"Starting Angles: {starting_angles}:")
+                print(f"Current Angles are:  {[round(value, 4) for value in current_angles]}")
+                print(f"Desired position is:  {[round(value, 4) for value in desired_GP_position]}")
                 print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
-                print(f"Current loss is:  {loss}")      
-            
+                print(f"Current loss is:  {loss}")  
 
+
+            if loss < best_loss:
+                best_loss = loss
+                best_angles = current_angles 
+
+   
         # return the best angles found
-        return current_angles
+        return best_angles
 
 
 # this represents the leipzig robot arm specifically
@@ -232,10 +281,17 @@ class Leipzig_Robot_Arm(Robot_Arm):
     def __init__(self) -> None:
         # this is an arbitrary set of initial angles and arm lengths
         # these should be replaces with known infomation about the arms position at specific angles
-        # the robots's base can be controled by a 180 degree angle servo and still grab all points
-        arm_initial_angles = (pi/2,) * 4
 
-        arm_max_angles = (pi,) * 4
+
+        # the robots's base can be controled by a 180 degree angle servo and still grab all points
+        arm_initial_angles = (np.pi/2,) * 4
+        arm_max_angles = (np.pi,) * 4
+
+        # # but intresting SGD seems to encounter less local minima when the base can rotate 360 degrees
+        # # could make an algorimic solution to convert these angles to one where the base was withing 0 to 180 degrees
+        # arm_initial_angles = (np.pi, np.pi/2, np.pi/2, np.pi/2)
+        # arm_max_angles = (2*np.pi, np.pi, np.pi, np.pi)
+
         arm_angle_intervals = tuple((0.0, max_angle) for max_angle in arm_max_angles)
 
         # compute position vectors of all joints and the grap point

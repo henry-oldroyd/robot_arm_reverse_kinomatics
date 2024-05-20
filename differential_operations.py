@@ -182,6 +182,9 @@ class Rotation_About_Vector_3D(Parameterised_Differentiable_Tranformation):
         self._parameter_given = True
         self._theta = parameter_value
 
+        # modify theta to be in the range of 0 to 2pi
+        self._theta = self._theta % (2 * np.pi)
+
         # calculate the rotation matrix and its derivative (from website)
         cos = np.cos(self._theta)
         sin = np.sin(self._theta)
