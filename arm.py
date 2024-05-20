@@ -175,122 +175,126 @@ class Robot_Arm:
         # model seems to do better with high learning rate and no momentum
 
         # high learning rate numerically stable for this problem
-        learning_rate = 0.5
-        # no mpmentum
-        momentum_coefficeint = 0.0
+        learning_rate = 0.2
 
-        # # lower leraning rate
-        # learning_rate = 0.01
-        # # some momentum
-        # momentum_coefficeint = 0.9
+        # dynamically adjust the learning rate based on the loss
+        # learning_rate_halflife_decreases = 200
+        # learning_rate_doublelife_increases = learning_rate_halflife_decreases / 20
+
+        # learning_rate_decrease_multiplier = 0.5 ** (1/learning_rate_halflife_decreases)
+        # assert 0 < learning_rate_decrease_multiplier < 1
+        # learning_rate_increase_multiplier = 2 ** (1/learning_rate_doublelife_increases)
+        # assert learning_rate_increase_multiplier > 1
+
+        # # only decrease learning rate
+        # learning_rate_halflife_decreases = 200
+        # learning_rate_decrease_multiplier = 0.5 ** (1/learning_rate_halflife_decreases)
+        # assert 0 < learning_rate_decrease_multiplier < 1
+        # learning_rate_increase_multiplier = 1.0
+
+        # don't change learning rate
+        learning_rate_decrease_multiplier = 1.0
+        learning_rate_increase_multiplier = 1.0
+
 
 
         # the number of updates with SGD for each set of starting angles
         # higher number means more accuracy but slower
-        max_updates = 200
+        max_updates = 2000
 
+        # add mechanism to end if loss is below a theshold
+        loss_threshold = 1e-8
+        previous_losses_window = 20
+        previous_losses = [None] * previous_losses_window
 
+        # map the angles to the target interval
+        current_angles_precursors = np.array([0.0]*4)
+        starting_angles = self._angle_interval_mapping.function(current_angles_precursors)           
+        current_angles = starting_angles
 
-        # precursors_different_vase_positions = (
-        #     np.array([-5.0, 0.0, 0.0, 0.0]),
-        #     np.zeros((self._num_joints + 1,)),
-        #     np.array([5.0, 0.0, 0.0, 0.0]),
-        # )
+        # for each SGD update
+        for update_index in range(max_updates):
+            # get the current position of the grap point at current angles
+            current_GP_position = self.get_GP_position_at_angles(current_angles)
 
-        precursors_different_vase_positions = (
-            # np.array([-1.0]*4),
-            np.array([0.0]*4),
-            # np.array([1.0]*4),
-        )
+            # get the derivative of the current position with respect to the angles
+            current_transformation_parameter_derivatives = self._grap_point_transformation_composition.get_parameter_derivatives() 
+            # convert paramerter derivatives dict to numpy array
 
+            current_angles_derivative = np.array([
+                current_transformation_parameter_derivatives[f"theta_j{j_num}"]
+                for j_num in range(self._num_joints + 1)
+            ]).reshape((self._num_joints + 1, 3))
 
-        best_angles = None
-        best_loss = float("inf")
+            # get the derivative of the mapping from precursors to angles
+            angles_mapping_derivative = self._angle_interval_mapping.derivative_WR_vector(current_angles_precursors)
 
-        for current_angles_precursors in precursors_different_vase_positions:
+            # apply chain rule to get dl/dprecursors
+            derivative_of_loss_WR_precursors = (-1/2) * (
+                angles_mapping_derivative
+                @ current_angles_derivative
+                @ (desired_GP_position - current_GP_position)
+            )
 
-            # set up an accumulator for derivatives to use momentum
-            # set to additivie identity to start
-            precursor_derivatives_momentum = np.zeros((self._num_joints + 1,))
+            # update the precursors with the gradient descent step
+            current_angles_precursors -= learning_rate * derivative_of_loss_WR_precursors
 
-            # map the angles to the target interval
-            starting_angles = self._angle_interval_mapping.function(current_angles_precursors)           
-            current_angles = starting_angles
+            # get current angles from new precursors
+            current_angles = self._angle_interval_mapping.function(current_angles_precursors)
 
-            # for each SGD update
-            for update_index in range(max_updates):
-                # get the current position of the grap point at current angles
-                current_GP_position = self.get_GP_position_at_angles(current_angles)
-
-                # get the derivative of the current position with respect to the angles
-                current_transformation_parameter_derivatives = self._grap_point_transformation_composition.get_parameter_derivatives() 
-                # convert paramerter derivatives dict to numpy array
-
-                current_angles_derivative = np.array([
-                    current_transformation_parameter_derivatives[f"theta_j{j_num}"]
-                    for j_num in range(self._num_joints + 1)
-                ]).reshape((self._num_joints + 1, 3))
-
-                # get the derivative of the mapping from precursors to angles
-                angles_mapping_derivative = self._angle_interval_mapping.derivative_WR_vector(current_angles_precursors)
-
-                # apply chain rule to get dl/dprecursors
-                derivative_of_loss_WR_precursors = (-1/2) * (
-                    angles_mapping_derivative
-                    @ current_angles_derivative
-                    @ (desired_GP_position - current_GP_position)
-                )
-
-                precursor_derivatives_momentum = (
-                    momentum_coefficeint * precursor_derivatives_momentum
-                    + (1-momentum_coefficeint) * derivative_of_loss_WR_precursors
-                )
-
-                # update the precursors with the gradient descent step
-                current_angles_precursors -= learning_rate * precursor_derivatives_momentum
-
-                # get current angles from new precursors
-                current_angles = self._angle_interval_mapping.function(current_angles_precursors)
-
-                if echo_level >= 2:
-                    # get current loss from new precursors for printing
-                    loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
-                    
-                    if update_index % (max_updates//20) == 0:
-                        print(f"Iteration {update_index}: Current loss is:  {loss}")
-
-                if echo_level >= 3:
-                    
-                    if update_index % (max_updates//20) != 0:
-                        print(f"Iteration {update_index}: Current loss is:  {loss}")
-
-                if echo_level >= 4:
-                    # print out the current state of the optimisation algorithm             
-                    print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
-                    print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
-                
-
-
-
-            # check if this loss is the best so far. If so update the best angles
+            # get current loss
             loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
 
-            if echo_level >= 1:
-                # print out the current state of the optimisation algorithm  
-                print(f"Starting Angles: {[round(value, 4) for value in starting_angles]}:")
-                print(f"Current Angles are:  {[round(value, 4) for value in current_angles]}")
-                print(f"Desired position is:  {[round(value, 4) for value in desired_GP_position]}")
+            # check if the loss is increasing compared to average of previous 50 losses
+            if update_index < previous_losses_window:
+                previous_losses[update_index] = loss
+            else:
+                average_previous_losses = sum(previous_losses) / previous_losses_window 
+
+                # if loss is decreasing increase learning rate
+                if loss < average_previous_losses:
+                    learning_rate *= learning_rate_increase_multiplier
+                # otherwise decrease learning rate
+                else:
+                    learning_rate *= learning_rate_decrease_multiplier
+
+                previous_losses[update_index % previous_losses_window] = loss
+
+
+            # send message at the start and at 5% incriments
+            send_msg_lvl_2 = update_index == 0 or update_index % (max_updates//20) == (max_updates//20)-1
+            message = f"Iteration {update_index}: Current loss is:  {loss:.12f} with learning rate:   {learning_rate:.8f}"  
+
+            if echo_level >= 2 and send_msg_lvl_2:
+                print(message)
+
+            if echo_level >= 3 and not send_msg_lvl_2:
+                print(message)
+
+            if echo_level >= 4:
+                # print out the current state of the optimisation algorithm             
+                print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
                 print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
-                print(f"Current loss is:  {loss}")  
+            
+            # end training if loss is below a certain threshold
+            if loss < loss_threshold:
+                break
 
 
-            if loss < best_loss:
-                best_loss = loss
-                best_angles = current_angles 
+
+
+        if echo_level >= 1:
+            # print out the current state of the optimisation algorithm  
+            print(f"Starting Angles: {[round(value, 4) for value in starting_angles]}:")
+            print(f"Current Angles are:  {[round(value, 4) for value in current_angles]}")
+            print(f"Desired position is:  {[round(value, 4) for value in desired_GP_position]}")
+            print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
+            print(f"Current loss is:  {loss}")  
+
 
    
         # return the best angles found
-        return best_angles
+        return current_angles
 
 
 
