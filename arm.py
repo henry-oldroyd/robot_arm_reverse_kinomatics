@@ -177,35 +177,13 @@ class Robot_Arm:
         # high learning rate numerically stable for this problem
         learning_rate = 0.2
 
-        # dynamically adjust the learning rate based on the loss
-        # learning_rate_halflife_decreases = 200
-        # learning_rate_doublelife_increases = learning_rate_halflife_decreases / 20
-
-        # learning_rate_decrease_multiplier = 0.5 ** (1/learning_rate_halflife_decreases)
-        # assert 0 < learning_rate_decrease_multiplier < 1
-        # learning_rate_increase_multiplier = 2 ** (1/learning_rate_doublelife_increases)
-        # assert learning_rate_increase_multiplier > 1
-
-        # # only decrease learning rate
-        # learning_rate_halflife_decreases = 200
-        # learning_rate_decrease_multiplier = 0.5 ** (1/learning_rate_halflife_decreases)
-        # assert 0 < learning_rate_decrease_multiplier < 1
-        # learning_rate_increase_multiplier = 1.0
-
-        # don't change learning rate
-        learning_rate_decrease_multiplier = 1.0
-        learning_rate_increase_multiplier = 1.0
-
-
 
         # the number of updates with SGD for each set of starting angles
         # higher number means more accuracy but slower
-        max_updates = 2000
+        max_updates = 1000
 
         # add mechanism to end if loss is below a theshold
         loss_threshold = 1e-8
-        previous_losses_window = 20
-        previous_losses = [None] * previous_losses_window
 
         # map the angles to the target interval
         current_angles_precursors = np.array([0.0]*4)
@@ -245,25 +223,10 @@ class Robot_Arm:
             # get current loss
             loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
 
-            # check if the loss is increasing compared to average of previous 50 losses
-            if update_index < previous_losses_window:
-                previous_losses[update_index] = loss
-            else:
-                average_previous_losses = sum(previous_losses) / previous_losses_window 
-
-                # if loss is decreasing increase learning rate
-                if loss < average_previous_losses:
-                    learning_rate *= learning_rate_increase_multiplier
-                # otherwise decrease learning rate
-                else:
-                    learning_rate *= learning_rate_decrease_multiplier
-
-                previous_losses[update_index % previous_losses_window] = loss
-
 
             # send message at the start and at 5% incriments
             send_msg_lvl_2 = update_index == 0 or update_index % (max_updates//20) == (max_updates//20)-1
-            message = f"Iteration {update_index}: Current loss is:  {loss:.12f} with learning rate:   {learning_rate:.8f}"  
+            message = f"Iteration {update_index}: Current loss is:  {loss:.12f}"  
 
             if echo_level >= 2 and send_msg_lvl_2:
                 print(message)
@@ -279,7 +242,6 @@ class Robot_Arm:
             # end training if loss is below a certain threshold
             if loss < loss_threshold:
                 break
-
 
 
 
