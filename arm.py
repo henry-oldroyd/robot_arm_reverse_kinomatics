@@ -153,10 +153,13 @@ class Robot_Arm:
 
     # this method will return the angles of the arm given the position of the grap point
     # this is an optimisation problem so we will use gradient descent
-    def get_angles_for_GP_position(self, desired_GP_position: np.ndarray, echo: bool = False) -> np.ndarray:
-        # chech that the echo parameter is a boolean
-        if not isinstance(echo, bool):
+    def get_angles_for_GP_position(self, desired_GP_position: np.ndarray, echo_level: int = 0) -> np.ndarray:
+        # check that the excho level is an integer
+        if not isinstance(echo_level, int):
             raise TypeError("The echo parameter must be a boolean")
+        # check its 0 or a positive integer
+        if echo_level < 0:
+            raise ValueError("The echo parameter must be a non-negative integer")
 
         # check that the desired position is a numpy array of shape (3,)
         if not isinstance(desired_GP_position, np.ndarray):
@@ -169,18 +172,23 @@ class Robot_Arm:
 
 
         # hyperparameters for the gradient descent search for angles
+        # model seems to do better with high learning rate and no momentum
+
         # high learning rate numerically stable for this problem
         learning_rate = 0.5
+        # no mpmentum
+        momentum_coefficeint = 0.0
+
+        # # lower leraning rate
+        # learning_rate = 0.01
+        # # some momentum
+        # momentum_coefficeint = 0.9
+
 
         # the number of updates with SGD for each set of starting angles
         # higher number means more accuracy but slower
         max_updates = 200
 
-        # momentum hyperparameter
-        # momentum_coefficeint = 0.9
-        # momentum_coefficeint = 0.5
-        # momentum_coefficeint = 0.1
-        momentum_coefficeint = 0.0
 
 
         # precursors_different_vase_positions = (
@@ -244,23 +252,32 @@ class Robot_Arm:
                 # get current angles from new precursors
                 current_angles = self._angle_interval_mapping.function(current_angles_precursors)
 
-                # if echo:
-                #     # get current loss from new precursors for printing
-                #     loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
+                if echo_level >= 2:
+                    # get current loss from new precursors for printing
+                    loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
+                    
+                    if update_index % (max_updates//20) == 0:
+                        print(f"Iteration {update_index}: Current loss is:  {loss}")
 
-                #     # print out the current state of the optimisation algorithm             
-                #     print(f"Iteration {update_index}:")
-                #     print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
-                #     print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
-                #     print(f"Current loss is:  {loss}")      
+                if echo_level >= 3:
+                    
+                    if update_index % (max_updates//20) != 0:
+                        print(f"Iteration {update_index}: Current loss is:  {loss}")
+
+                if echo_level >= 4:
+                    # print out the current state of the optimisation algorithm             
+                    print(f"Current angles are:   {[round(value, 4) for value in current_angles]}")
+                    print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
                 
+
+
 
             # check if this loss is the best so far. If so update the best angles
             loss = (desired_GP_position - current_GP_position).T @ (desired_GP_position - current_GP_position)
 
-            if echo:
+            if echo_level >= 1:
                 # print out the current state of the optimisation algorithm  
-                print(f"Starting Angles: {starting_angles}:")
+                print(f"Starting Angles: {[round(value, 4) for value in starting_angles]}:")
                 print(f"Current Angles are:  {[round(value, 4) for value in current_angles]}")
                 print(f"Desired position is:  {[round(value, 4) for value in desired_GP_position]}")
                 print(f"Current position is:  {[round(value, 4) for value in current_GP_position]}")
@@ -317,10 +334,10 @@ class Robot_Arm_PI_Base(Robot_Arm):
         return super().get_GP_position_at_angles(angles)
 
 
-    def get_angles_for_GP_position(self, desired_GP_position: np.ndarray, echo: bool = False) -> np.ndarray:
+    def get_angles_for_GP_position(self, desired_GP_position: np.ndarray, echo_level: int = 0) -> np.ndarray:
         
         # get solution to corresponding arm for 2pi base angle
-        angles_estimate = super().get_angles_for_GP_position(desired_GP_position, echo)
+        angles_estimate = super().get_angles_for_GP_position(desired_GP_position, echo_level)
 
         achieved_GP_position = self.get_GP_position_at_angles(angles_estimate)
         
