@@ -190,9 +190,9 @@ class Robot_Arm:
         # )
 
         precursors_different_vase_positions = (
-            np.array([-1.0]*4),
+            # np.array([-1.0]*4),
             np.array([0.0]*4),
-            np.array([1.0]*4),
+            # np.array([1.0]*4),
         )
 
 
@@ -276,23 +276,86 @@ class Robot_Arm:
         return best_angles
 
 
+
+class Robot_Arm_PI_Base(Robot_Arm):
+    def __init__(self,
+        starting_joint_angles,
+        joint_angle_intervals,
+        starting_joint_position_vectors,
+        starting_base_position_vector,
+        starting_grab_point_position_vector,
+        total_arm_reach
+    ) -> None:
+        
+        # add in base angles
+        arm_initial_angles = [np.pi] + list(starting_joint_angles)
+        arm_angle_intervals = [(0.0, 2*np.pi)] + list(joint_angle_intervals)
+
+        # call the super class constructor
+        super().__init__(
+            starting_angles = arm_initial_angles,
+            angle_intervals = arm_angle_intervals,
+            starting_joint_position_vectors = starting_joint_position_vectors,
+            starting_base_position_vector = starting_base_position_vector,
+            starting_grab_point_position_vector = starting_grab_point_position_vector,
+            total_arm_reach = total_arm_reach
+        )
+
+
+    def get_GP_position_at_angles(self, angles: np.ndarray) -> np.ndarray:
+        # check type of angles
+        if not isinstance(angles, np.ndarray):
+            raise TypeError("Angles must be a numpy array")
+        # check number of angles is base + num joints
+        if len(angles) != self._num_joints + 1:
+            raise ValueError("The number of angles should be equal to the number of joint positions + 1")
+
+        # check base angle in interval 0 to pi
+        if not 0 <= angles[0] <= 2*np.pi:
+            raise ValueError("The base angle should be within the interval 0 to 2*pi")
+        
+        return super().get_GP_position_at_angles(angles)
+
+
+    def get_angles_for_GP_position(self, desired_GP_position: np.ndarray, echo: bool = False) -> np.ndarray:
+        
+        # get solution to corresponding arm for 2pi base angle
+        angles_estimate = super().get_angles_for_GP_position(desired_GP_position, echo)
+
+        achieved_GP_position = self.get_GP_position_at_angles(angles_estimate)
+        
+        # check if base angle in interval (pi, 2pi]
+        if np.pi < angles_estimate[0] <= 2*np.pi:
+            
+            # find corresponding angles for base angle in interval [0, pi)
+
+            # rotate base angle by pi
+            angles_estimate[0] -= np.pi
+
+            # reflect joint angles about pi/2
+            for i in range(1, len(angles_estimate)):
+                # angles_estimate[i] = np.pi/2 - (angles_estimate[i] - np.pi/2)
+                angles_estimate[i] = np.pi - angles_estimate[i]
+
+
+        new_achieved_GP_position = self.get_GP_position_at_angles(angles_estimate)
+
+        assert np.allclose(new_achieved_GP_position, achieved_GP_position), "The angles have been incorrectly transformed to base servo 0 to pi"
+
+        return angles_estimate
+
 # this represents the leipzig robot arm specifically
-class Leipzig_Robot_Arm(Robot_Arm):
+class Leipzig_Robot_Arm(Robot_Arm_PI_Base):
     def __init__(self) -> None:
         # this is an arbitrary set of initial angles and arm lengths
         # these should be replaces with known infomation about the arms position at specific angles
 
 
         # the robots's base can be controled by a 180 degree angle servo and still grab all points
-        arm_initial_angles = (np.pi/2,) * 4
-        arm_max_angles = (np.pi,) * 4
+        joint_initial_angles = (np.pi/2,) * 3
+        joint_max_angles = (np.pi,) * 3
 
-        # # but intresting SGD seems to encounter less local minima when the base can rotate 360 degrees
-        # # could make an algorimic solution to convert these angles to one where the base was withing 0 to 180 degrees
-        # arm_initial_angles = (np.pi, np.pi/2, np.pi/2, np.pi/2)
-        # arm_max_angles = (2*np.pi, np.pi, np.pi, np.pi)
-
-        arm_angle_intervals = tuple((0.0, max_angle) for max_angle in arm_max_angles)
+        joint_angle_intervals = tuple((0.0, max_angle) for max_angle in joint_max_angles)
 
         # compute position vectors of all joints and the grap point
         arm_lengths = (1, 3, 2, 1)
@@ -311,8 +374,8 @@ class Leipzig_Robot_Arm(Robot_Arm):
 
 
         super().__init__(
-            starting_angles = arm_initial_angles,
-            angle_intervals = arm_angle_intervals,
+            starting_joint_angles = joint_initial_angles,
+            joint_angle_intervals = joint_angle_intervals,
             starting_joint_position_vectors = joint_positions,
             starting_base_position_vector = base_position,
             starting_grab_point_position_vector = grap_point_position,
